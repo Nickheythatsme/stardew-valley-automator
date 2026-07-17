@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "plan_id": "fixture-water-one",
+  "expected_observation_id": "obs-fixture-1",
+  "goal": "Water one reachable dry crop",
+  "actions": [
+    {
+      "action_id": "water-1",
+      "action": "water_crop",
+      "args": {
+        "target_id": "Farm/crop/43,19",
+        "target_revision": "fixture-rev-1"
+      }
+    },
+    {
+      "action_id": "finish-1",
+      "action": "finish",
+      "args": {"reason": "The selected crop was watered."}
+    }
+  ],
+  "stop_conditions": {
+    "energy_below": 25,
+    "game_time_at_or_after": 1200,
+    "max_failures": 1
+  },
+  "request_replan_after": false
+}

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stardew-agent.local/schemas/observation.schema.json",
+  "title": "Stardew Agent Observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "observation_id", "world_revision", "captured_at_utc", "game", "player", "inventory", "local_grid", "entities", "summary"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "observation_id": {"type": "string", "minLength": 1},
+    "world_revision": {"type": "integer", "minimum": 0},
+    "captured_at_utc": {"type": "string", "format": "date-time"},
+    "game": {"$ref": "#/$defs/game"},
+    "player": {"$ref": "#/$defs/player"},
+    "inventory": {"type": "array", "items": {"$ref": "#/$defs/inventory"}, "maxItems": 36},
+    "local_grid": {"$ref": "#/$defs/grid"},
+    "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}, "maxItems": 128},
+    "summary": {"type": "object"},
+    "previous_execution": {"type": ["object", "null"]}
+  },
+  "$defs": {
+    "tile": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}},
+    "pixel": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}}},
+    "game": {
+      "type": "object", "additionalProperties": false,
+      "required": ["save_id", "time", "season", "day", "year", "weather", "location", "world_ready", "paused", "active_menu", "event_active"],
+      "properties": {
+        "save_id": {"type": "string"}, "time": {"type": "integer"}, "season": {"enum": ["spring", "summer", "fall", "winter"]},
+        "day": {"type": "integer"}, "year": {"type": "integer"}, "weather": {"type": "string"}, "location": {"const": "Farm"},
+        "world_ready": {"type": "boolean"}, "paused": {"type": "boolean"}, "active_menu": {"type": ["string", "null"]}, "event_active": {"type": "boolean"}
+      }
+    },
+    "player": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tile", "pixel", "facing", "energy", "max_energy", "health", "max_health", "money", "busy", "using_tool", "selected_slot"],
+      "properties": {
+        "tile": {"$ref": "#/$defs/tile"}, "pixel": {"$ref": "#/$defs/pixel"}, "facing": {"enum": ["up", "right", "down", "left"]},
+        "energy": {"type": "number"}, "max_energy": {"type": "integer"}, "health": {"type": "integer"}, "max_health": {"type": "integer"},
+        "money": {"type": "integer"}, "busy": {"type": "boolean"}, "using_tool": {"type": "boolean"}, "selected_slot": {"type": "integer"}
+      }
+    },
+    "inventory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["slot", "qualified_item_id", "name", "type", "quantity"],
+      "properties": {
+        "slot": {"type": "integer"}, "qualified_item_id": {"type": "string"}, "name": {"type": "string"}, "type": {"type": "string"}, "quantity": {"type": "integer"},
+        "tool_upgrade_level": {"type": ["integer", "null"]}, "water": {"type": ["integer", "null"]}, "water_capacity": {"type": ["integer", "null"]}
+      }
+    },
+    "grid": {
+      "type": "object", "additionalProperties": false,
+      "required": ["origin", "width", "height", "rows", "legend"],
+      "properties": {
+        "origin": {"$ref": "#/$defs/tile"}, "width": {"type": "integer", "minimum": 1, "maximum": 31}, "height": {"type": "integer", "minimum": 1, "maximum": 31},
+        "rows": {"type": "array", "items": {"type": "string"}, "maxItems": 31}, "legend": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "entity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "revision", "kind", "location", "tile", "reachable", "path_cost", "interaction_tiles", "properties"],
+      "properties": {
+        "id": {"type": "string"}, "revision": {"type": "string"}, "kind": {"enum": ["crop", "tilled_soil", "container", "water_source"]}, "location": {"const": "Farm"},
+        "tile": {"$ref": "#/$defs/tile"}, "reachable": {"type": "boolean"}, "path_cost": {"type": ["integer", "null"]},
+        "interaction_tiles": {"type": "array", "items": {"type": "object"}}, "properties": {"type": "object"}
+      }
+    }
+  }
+}

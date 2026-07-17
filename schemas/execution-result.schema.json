@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stardew-agent.local/schemas/execution-result.schema.json",
+  "title": "Stardew Agent Execution Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["execution_id", "plan_id", "status", "accepted_at_utc", "actions", "budget_usage", "requires_replan"],
+  "properties": {
+    "execution_id": {"type": "string"},
+    "plan_id": {"type": "string"},
+    "status": {"enum": ["RECEIVED", "PARSED", "VALIDATED", "ACCEPTED", "RUNNING", "WAITING_FOR_GAME", "COMPLETED", "COMPLETED_WITH_FAILURES", "CANCELLED", "TIMED_OUT", "BUDGET_EXCEEDED", "VALIDATION_FAILED", "GAME_INTERRUPTED", "FATAL_ERROR"]},
+    "accepted_at_utc": {"type": "string", "format": "date-time"},
+    "started_at_utc": {"type": ["string", "null"], "format": "date-time"},
+    "ended_at_utc": {"type": ["string", "null"], "format": "date-time"},
+    "actions": {"type": "array", "items": {"type": "object"}, "maxItems": 64},
+    "budget_usage": {"type": "object"},
+    "final_observation": {"type": ["object", "null"]},
+    "requires_replan": {"type": "boolean"},
+    "message": {"type": ["string", "null"]}
+  }
+}

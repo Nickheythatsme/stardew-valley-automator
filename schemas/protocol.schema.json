@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stardew-agent.local/schemas/protocol.schema.json",
+  "title": "Stardew Agent Protocol Envelope",
+  "oneOf": [
+    {"$ref": "#/$defs/request"},
+    {"$ref": "#/$defs/response"},
+    {"$ref": "#/$defs/event"}
+  ],
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "type", "request_id", "method", "params"],
+      "properties": {
+        "protocol_version": {"const": "1.0"},
+        "type": {"const": "request"},
+        "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "method": {"enum": ["hello", "observe", "execute_plan", "get_execution", "cancel_execution", "ping"]},
+        "params": {"type": "object"}
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "type", "request_id", "ok"],
+      "properties": {
+        "protocol_version": {"const": "1.0"},
+        "type": {"const": "response"},
+        "request_id": {"type": "string"},
+        "ok": {"type": "boolean"},
+        "result": {},
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": {"type": "string"},
+            "message": {"type": "string"},
+            "details": {}
+          }
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "type", "sequence", "event", "payload"],
+      "properties": {
+        "protocol_version": {"const": "1.0"},
+        "type": {"const": "event"},
+        "sequence": {"type": "integer", "minimum": 1},
+        "event": {"enum": ["execution_state_changed", "action_completed", "observation_invalidated", "game_interrupted", "session_ended"]},
+        "execution_id": {"type": ["string", "null"]},
+        "payload": {}
+      }
+    }
+  }
+}

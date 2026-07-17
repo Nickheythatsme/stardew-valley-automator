@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>StardewAgent.Mod</AssemblyName>
+    <RootNamespace>StardewAgent.Mod</RootNamespace>
+    <Version>0.1.0</Version>
+    <EnableHarmony>false</EnableHarmony>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.4.0" />
+    <ProjectReference Include="../StardewAgent.Protocol/StardewAgent.Protocol.csproj" />
+    <ProjectReference Include="../StardewAgent.Core/StardewAgent.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

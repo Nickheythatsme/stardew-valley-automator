@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "observation_id": "obs-fixture-1",
+  "world_revision": 1,
+  "captured_at_utc": "2026-07-16T18:00:00Z",
+  "game": {
+    "save_id": "test-save",
+    "time": 640,
+    "season": "spring",
+    "day": 8,
+    "year": 1,
+    "weather": "sunny",
+    "location": "Farm",
+    "world_ready": true,
+    "paused": false,
+    "active_menu": null,
+    "event_active": false
+  },
+  "player": {
+    "tile": {"x": 42, "y": 18},
+    "pixel": {"x": 2688, "y": 1152},
+    "facing": "down",
+    "energy": 221,
+    "max_energy": 270,
+    "health": 100,
+    "max_health": 100,
+    "money": 640,
+    "busy": false,
+    "using_tool": false,
+    "selected_slot": 0
+  },
+  "inventory": [
+    {
+      "slot": 0,
+      "qualified_item_id": "(T)WateringCan",
+      "name": "Watering Can",
+      "type": "tool",
+      "quantity": 1,
+      "tool_upgrade_level": 0,
+      "water": 31,
+      "water_capacity": 40
+    }
+  ],
+  "local_grid": {
+    "origin": {"x": 38, "y": 14},
+    "width": 5,
+    "height": 5,
+    "rows": [".....", ".....", "..@..", "...c.", "....."],
+    "legend": {".": "walkable", "@": "player", "c": "dry crop"}
+  },
+  "entities": [
+    {
+      "id": "Farm/crop/43,19",
+      "revision": "fixture-rev-1",
+      "kind": "crop",
+      "location": "Farm",
+      "tile": {"x": 43, "y": 19},
+      "reachable": true,
+      "path_cost": 10,
+      "interaction_tiles": [
+        {"tile": {"x": 43, "y": 18}, "facing": "down", "reachable": true, "path_cost": 10}
+      ],
+      "properties": {
+        "crop_id": "24",
+        "display_name": "Parsnip",
+        "watered": false,
+        "needs_watering": true,
+        "mature": false,
+        "harvestable": false,
+        "harvest_method": "hand"
+      }
+    }
+  ],
+  "summary": {
+    "dry_crops": 1,
+    "harvestable_crops": 0,
+    "empty_tilled_tiles": 0,
+    "reachable_water_sources": 0,
+    "containers": 0,
+    "omitted_entities": {}
+  }
+}

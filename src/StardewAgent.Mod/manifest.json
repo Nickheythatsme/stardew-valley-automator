@@ -1,0 +1,10 @@
+{
+  "Name": "Stardew Agent",
+  "Author": "Nickheythatsme",
+  "Version": "0.1.0",
+  "Description": "A safety-bounded semantic control layer for an external Stardew Valley agent.",
+  "UniqueID": "Nickheythatsme.StardewAgent",
+  "EntryDll": "StardewAgent.Mod.dll",
+  "MinimumApiVersion": "4.5.2",
+  "MinimumGameVersion": "1.6.15"
+}
