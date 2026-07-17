@@ -28,7 +28,7 @@ public sealed class ModEntry : StardewModdingAPI.Mod
         helper.Events.GameLoop.UpdateTicking += OnUpdateTicking;
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
         helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
-        helper.Events.GameLoop.DayStarted += OnWorldChanged;
+        helper.Events.GameLoop.DayStarted += OnDayStarted;
         helper.Events.GameLoop.TimeChanged += OnWorldChanged;
         helper.Events.GameLoop.ReturnedToTitle += OnReturnedToTitle;
         helper.Events.Player.Warped += OnWarped;
@@ -74,7 +74,13 @@ public sealed class ModEntry : StardewModdingAPI.Mod
                         ModManifest.Version.ToString(),
                         Game1.version,
                         Constants.ApiVersion.ToString(),
-                        new[] { "observe", "move_to", "water_crop", "refill_watering_can", "wait", "finish" },
+                        new[]
+                        {
+                            "observe", "travel_to", "clear_debris", "plant_crop", "water_crop",
+                            "refill_watering_can", "harvest_crop", "buy_item", "ship_items",
+                            "wait_until", "sleep",
+                            "advance_dialogue", "dismiss_menu", "finish"
+                        },
                         $"game-{Environment.ProcessId}")));
                     break;
                 case "ping":
@@ -141,6 +147,8 @@ public sealed class ModEntry : StardewModdingAPI.Mod
     private void OnWarped(object? sender, WarpedEventArgs e)
     {
         observations?.Invalidate();
+        if (executor?.HandleWarp(e.OldLocation.NameOrUniqueName, e.NewLocation.NameOrUniqueName) == true)
+            return;
         executor?.CancelActive("GAME_INTERRUPTED", $"Location changed from {e.OldLocation.NameOrUniqueName} to {e.NewLocation.NameOrUniqueName}.");
         protocol?.Publish("game_interrupted", null, new { code = "LOCATION_CHANGED" });
     }
@@ -148,7 +156,9 @@ public sealed class ModEntry : StardewModdingAPI.Mod
     private void OnMenuChanged(object? sender, MenuChangedEventArgs e)
     {
         observations?.Invalidate();
-        if (executor?.IsRunning == true && e.NewMenu is not null)
+        if (executor?.IsRunning == true
+            && executor.HandleMenuChanged(e.OldMenu, e.NewMenu) == false
+            && e.NewMenu is not null)
             executor.CancelActive("GAME_INTERRUPTED", $"Unexpected menu opened: {e.NewMenu.GetType().Name}.");
     }
 
@@ -156,13 +166,19 @@ public sealed class ModEntry : StardewModdingAPI.Mod
     {
         if (executor?.IsRunning != true)
             return;
-        if (executor.LastInjectedButton is { } injected && injected == e.Button)
+        if (executor.InjectedInputActive)
             return;
         if (e.Button.IsActionButton() || e.Button.IsUseToolButton() || IsMovementButton(e.Button))
             executor.CancelActive("GAME_INTERRUPTED", $"Manual input interrupted automation: {e.Button}.");
     }
 
     private void OnWorldChanged(object? sender, EventArgs e) => observations?.Invalidate();
+
+    private void OnDayStarted(object? sender, DayStartedEventArgs e)
+    {
+        observations?.Invalidate();
+        executor?.HandleDayStarted();
+    }
 
     private void OnReturnedToTitle(object? sender, ReturnedToTitleEventArgs e)
     {

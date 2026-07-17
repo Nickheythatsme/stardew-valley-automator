@@ -9,8 +9,10 @@ public static class PlanValidation
 {
     private static readonly HashSet<string> AllowedActions = new(StringComparer.Ordinal)
     {
-        "move_to", "water_crop", "refill_watering_can", "harvest_crop",
-        "plant_seed", "deposit_items", "wait", "finish"
+        "travel_to", "clear_debris", "plant_crop", "water_crop",
+        "refill_watering_can", "harvest_crop", "buy_item", "ship_items",
+        "wait_until", "sleep", "advance_dialogue", "choose_response",
+        "dismiss_menu", "finish"
     };
 
     private static readonly HashSet<string> AllowedContinueCodes = new(StringComparer.Ordinal)
@@ -69,17 +71,34 @@ public static class PlanValidation
         {
             case "water_crop":
             case "harvest_crop":
+            case "clear_debris":
                 if (!HasString("target_id") || !HasString("target_revision"))
                     issues.Add(new($"{path}/args", "MISSING_TARGET", "A target_id and target_revision are required."));
                 break;
-            case "move_to":
-                if (!action.Args.TryGetProperty("tile", out var tile) || tile.ValueKind != JsonValueKind.Array || tile.GetArrayLength() != 2)
-                    issues.Add(new($"{path}/args/tile", "INVALID_TILE", "tile must contain exactly two integers."));
+            case "plant_crop":
+                if (!HasString("target_id") || !HasString("target_revision") || !HasString("qualified_item_id"))
+                    issues.Add(new($"{path}/args", "MISSING_PLANT_ARGUMENT", "target_id, target_revision, and qualified_item_id are required."));
+                if (!action.Args.TryGetProperty("water_after_planting", out var water) || water.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    issues.Add(new($"{path}/args/water_after_planting", "INVALID_PLANT_ARGUMENT", "water_after_planting must be a boolean."));
                 break;
-            case "wait":
-                if (!action.Args.TryGetProperty("ticks", out var ticks) || !ticks.TryGetInt32(out var tickCount)
-                    || tickCount is < 1 or > ProtocolLimits.MaxWaitTicks)
-                    issues.Add(new($"{path}/args/ticks", "INVALID_WAIT", $"ticks must be between 1 and {ProtocolLimits.MaxWaitTicks}."));
+            case "travel_to":
+                if (!HasString("destination"))
+                    issues.Add(new($"{path}/args/destination", "INVALID_DESTINATION", "destination is required."));
+                break;
+            case "buy_item":
+                if (!HasString("offer_id") || !HasString("offer_revision"))
+                    issues.Add(new($"{path}/args", "MISSING_OFFER", "offer_id and offer_revision are required."));
+                if (!action.Args.TryGetProperty("quantity", out var quantity) || !quantity.TryGetInt32(out var count) || count is < 1 or > 999)
+                    issues.Add(new($"{path}/args/quantity", "INVALID_QUANTITY", "quantity must be between 1 and 999."));
+                break;
+            case "wait_until":
+                if (!action.Args.TryGetProperty("time", out var time) || !time.TryGetInt32(out var targetTime)
+                    || targetTime is < 600 or > 2600)
+                    issues.Add(new($"{path}/args/time", "INVALID_TIME", "time must be between 600 and 2600."));
+                break;
+            case "choose_response":
+                if (!HasString("response_id"))
+                    issues.Add(new($"{path}/args/response_id", "INVALID_RESPONSE", "response_id is required."));
                 break;
             case "finish":
                 if (!HasString("reason") || action.Args.GetProperty("reason").GetString()!.Length > 256)

@@ -8,6 +8,7 @@ using StardewAgent.Mod.Protocol;
 using StardewAgent.Protocol;
 using StardewModdingAPI;
 using StardewValley;
+using StardewValley.Menus;
 using StardewValley.TerrainFeatures;
 using StardewValley.Tools;
 using ProtocolObservation = StardewAgent.Protocol.Observation;
@@ -26,6 +27,8 @@ internal sealed class PlanExecutor
     private MutableExecution? active;
     private ActiveAction? currentAction;
     private bool cancelRequested;
+    private long lastExecutionGameTick = long.MinValue / 2;
+    private long lastInputGameTick = long.MinValue / 2;
 
     public PlanExecutor(IGameFacade game, IModHelper helper, ObservationBuilder observations, ProtocolServer protocol)
     {
@@ -38,6 +41,8 @@ internal sealed class PlanExecutor
 
     public bool IsRunning => active is not null;
     public SButton? LastInjectedButton { get; private set; }
+    public bool InjectedInputActive => game.Tick - lastInjectedTick <= 2;
+    private long lastInjectedTick = long.MinValue / 2;
 
     public string Start(ActionPlan plan)
     {
@@ -79,11 +84,61 @@ internal sealed class PlanExecutor
             FinishExecution(code, message, true);
     }
 
+    public bool HandleWarp(string oldLocation, string newLocation)
+    {
+        if (currentAction?.PlanAction.Action != "travel_to"
+            || currentAction.ExpectedFromLocation != oldLocation
+            || currentAction.ExpectedToLocation != newLocation)
+            return false;
+        movement.Cancel("EXPECTED_WARP");
+        Succeed("OK", $"Travelled from {oldLocation} to {newLocation}.", true);
+        observations.Invalidate();
+        return true;
+    }
+
+    public bool HandleMenuChanged(IClickableMenu? oldMenu, IClickableMenu? newMenu)
+    {
+        if (currentAction is null)
+            return false;
+        if (currentAction.PlanAction.Action == "sleep"
+            && (newMenu?.GetType().Name.Contains("Dialogue", StringComparison.OrdinalIgnoreCase) == true
+                || newMenu is null))
+        {
+            currentAction.OwnsMenu = newMenu is not null;
+            return true;
+        }
+        if (currentAction.PlanAction.Action is "advance_dialogue" or "dismiss_menu")
+        {
+            currentAction.OwnsMenu = newMenu is not null;
+            return true;
+        }
+        if (currentAction.PlanAction.Action is "buy_item" or "ship_items")
+        {
+            currentAction.OwnsMenu = newMenu is not null;
+            return newMenu is null
+                || newMenu is ShopMenu
+                || newMenu.GetType().Name.Contains("Shipping", StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
+    public void HandleDayStarted()
+    {
+        observations.Invalidate();
+        if (currentAction?.PlanAction.Action == "sleep")
+            Succeed("OK", "The day advanced and the new day started.", true);
+    }
+
     public void ApplyInput()
     {
         LastInjectedButton = null;
         if (active is null || currentAction is null)
             return;
+        if (game.InputSuspended)
+            return;
+        if (game.Tick == lastInputGameTick)
+            return;
+        lastInputGameTick = game.Tick;
         if (movement.Running)
         {
             var button = movement.InputForCurrentTick();
@@ -91,19 +146,32 @@ internal sealed class PlanExecutor
             {
                 LastInjectedButton = button;
                 helper.Input.Press(button.Value);
+                lastInjectedTick = game.Tick;
             }
             return;
         }
-        if (currentAction.Phase == ActionPhase.TriggerTool && !currentAction.InputTriggered)
+        if (currentAction.Phase == ActionPhase.TriggerInput && !currentAction.InputTriggered)
         {
-            var button = Game1.options.useToolButton.Count() > 0
-                ? Game1.options.useToolButton[0].ToSButton()
-                : SButton.MouseLeft;
+            var button = currentAction.UseActionButton
+                ? (Game1.options.actionButton.Count() > 0
+                    ? Game1.options.actionButton[0].ToSButton()
+                    : SButton.MouseRight)
+                : (Game1.options.useToolButton.Count() > 0
+                    ? Game1.options.useToolButton[0].ToSButton()
+                    : SButton.MouseLeft);
             LastInjectedButton = button;
             helper.Input.Press(button);
+            lastInjectedTick = game.Tick;
             currentAction.InputTriggered = true;
-            currentAction.Phase = ActionPhase.WaitForTool;
+            currentAction.Phase = ActionPhase.WaitForInput;
             currentAction.Trace.Add(new("TRIGGER_GAME_ACTION", game.Tick));
+        }
+        else if (currentAction.Phase == ActionPhase.WaitForWarp
+                 && currentAction.WarpButton is { } warpButton)
+        {
+            LastInjectedButton = warpButton;
+            helper.Input.Press(warpButton);
+            lastInjectedTick = game.Tick;
         }
     }
 
@@ -112,14 +180,20 @@ internal sealed class PlanExecutor
         LastInjectedButton = null;
         if (active is null)
             return;
+        if (game.InputSuspended)
+            return;
+        if (game.Tick == lastExecutionGameTick)
+            return;
+        lastExecutionGameTick = game.Tick;
         if (cancelRequested)
         {
             FinishExecution("CANCELLED", "Cancellation was requested.", true);
             return;
         }
-        if (!game.WorldReady || !game.IsFarm)
+        if ((!game.WorldReady || !game.IsSupportedLocation)
+            && currentAction?.Phase != ActionPhase.WaitForDay)
         {
-            FinishExecution("GAME_INTERRUPTED", "The game left the supported Farm state.", true);
+            FinishExecution("GAME_INTERRUPTED", "The game left the supported crop-runner locations.", true);
             return;
         }
         var exceeded = active.Budget.Exceeded(DateTimeOffset.UtcNow);
@@ -165,13 +239,9 @@ internal sealed class PlanExecutor
                 Succeed("FINISHED", action.Args.GetProperty("reason").GetString() ?? "Finished.", false);
                 FinishExecution("COMPLETED", "The plan finished explicitly.", false);
                 break;
-            case "wait":
-                currentAction.RemainingTicks = action.Args.GetProperty("ticks").GetInt32();
+            case "wait_until":
+                currentAction.TargetTime = action.Args.GetProperty("time").GetInt32();
                 currentAction.Phase = ActionPhase.Wait;
-                break;
-            case "move_to":
-                var tile = action.Args.GetProperty("tile");
-                StartMovement(new TilePoint(tile[0].GetInt32(), tile[1].GetInt32()));
                 break;
             case "water_crop":
                 BeginWaterCrop();
@@ -179,10 +249,400 @@ internal sealed class PlanExecutor
             case "refill_watering_can":
                 BeginRefillWateringCan();
                 break;
+            case "harvest_crop":
+                BeginHarvestCrop();
+                break;
+            case "plant_crop":
+                BeginPlantCrop();
+                break;
+            case "clear_debris":
+                BeginClearDebris();
+                break;
+            case "travel_to":
+                BeginTravel();
+                break;
+            case "sleep":
+                BeginSleep();
+                break;
+            case "advance_dialogue":
+                BeginAdvanceDialogue();
+                break;
+            case "dismiss_menu":
+                if (Game1.activeClickableMenu is null)
+                    Succeed("ALREADY_SATISFIED", "No menu is open.", false);
+                else
+                {
+                    Game1.exitActiveMenu();
+                    Succeed("OK", "The active vanilla menu was dismissed.", true);
+                }
+                break;
+            case "buy_item":
+                BeginBuyItem();
+                break;
+            case "ship_items":
+                BeginShipItems();
+                break;
             default:
                 Fail("ACTION_NOT_IMPLEMENTED", $"Action '{action.Action}' is reserved by the schema but is not enabled in this prototype.", false);
                 break;
         }
+    }
+
+    private void BeginShipItems()
+    {
+        if (currentAction is null || observations.LastObservation is null)
+            return;
+        var selectedIds = currentAction.PlanAction.Args.TryGetProperty("selector_item_ids", out var ids)
+            ? ids.EnumerateArray().Select(value => value.GetString()).Where(value => value is not null).ToHashSet(StringComparer.Ordinal)
+            : null;
+        var category = currentAction.PlanAction.Args.TryGetProperty("category", out var categoryValue)
+            ? categoryValue.GetString()
+            : null;
+        var slots = new List<int>();
+        for (var slot = 0; slot < game.Player.Items.Count; slot++)
+        {
+            var item = game.Player.Items[slot];
+            if (item is null || item is Tool || item is not StardewValley.Object || item.sellToStorePrice() <= 0)
+                continue;
+            var selected = selectedIds?.Contains(item.QualifiedItemId) == true
+                || category == "crop" && (item.HasContextTag("category_vegetable")
+                    || item.HasContextTag("category_fruit")
+                    || item.HasContextTag("category_flower"))
+                || category == "seed" && item.Category == StardewValley.Object.SeedsCategory
+                || category == "forage" && item.HasContextTag("category_forage");
+            if (selected)
+                slots.Add(slot);
+        }
+        currentAction.Preconditions.Add(new("matching_items_exist", slots.Count > 0));
+        if (slots.Count == 0)
+        {
+            Fail("ITEM_NOT_FOUND", "No shippable inventory items matched the selector.", false);
+            return;
+        }
+        currentAction.InventorySlots = slots;
+        currentAction.InventoryBefore = slots.Sum(slot => game.Player.Items[slot]?.Stack ?? 0);
+        currentAction.ShippingBefore = ShippingQuantity();
+        if (Game1.activeClickableMenu?.GetType().Name.Contains("Shipping", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            currentAction.Phase = ActionPhase.PerformMenuAction;
+            return;
+        }
+        var bin = observations.LastObservation.Entities
+            .Where(entity => entity.Kind == "shipping_bin" && entity.Reachable)
+            .OrderBy(entity => entity.PathCost ?? int.MaxValue)
+            .FirstOrDefault();
+        if (bin is null)
+        {
+            Fail("SHIPPING_BIN_UNREACHABLE", "No reachable shipping bin action is available.", true);
+            return;
+        }
+        currentAction.TargetId = bin.Id;
+        currentAction.TargetTile = bin.Tile;
+        currentAction.Operation = "open_shipping";
+        StartEntityMovement(bin);
+    }
+
+    private void BeginBuyItem()
+    {
+        if (currentAction is null || observations.LastObservation is null)
+            return;
+        if (Game1.activeClickableMenu is not ShopMenu shop)
+        {
+            Fail("WRONG_MENU", "buy_item requires the observed vanilla shop menu to remain open.", true);
+            return;
+        }
+        var offerId = currentAction.PlanAction.Args.GetProperty("offer_id").GetString()!;
+        var revision = currentAction.PlanAction.Args.GetProperty("offer_revision").GetString()!;
+        var quantity = currentAction.PlanAction.Args.GetProperty("quantity").GetInt32();
+        var offer = observations.LastObservation.ShopOffers.FirstOrDefault(candidate => candidate.Id == offerId);
+        currentAction.Preconditions.Add(new("offer_exists", offer is not null));
+        if (offer is null || offer.Revision != revision)
+        {
+            Fail("OFFER_STALE", "The selected shop offer changed.", false);
+            return;
+        }
+        var saleIndex = shop.forSale.FindIndex(sale =>
+            sale is Item item && item.QualifiedItemId == offer.QualifiedItemId);
+        if (saleIndex is < 0 or > 3)
+        {
+            Fail("OFFER_NOT_VISIBLE", "The selected offer is not in the visible bounded shop rows.", true);
+            return;
+        }
+        var totalPrice = checked(offer.Price * quantity);
+        currentAction.Preconditions.Add(new("sufficient_money", game.Player.Money >= totalPrice));
+        if (game.Player.Money < totalPrice)
+        {
+            Fail("INSUFFICIENT_MONEY", "The purchase exceeds the current wallet.", false);
+            return;
+        }
+        currentAction.OfferItemId = offer.QualifiedItemId;
+        currentAction.MenuIndex = saleIndex;
+        currentAction.Quantity = quantity;
+        currentAction.MoneyBefore = game.Player.Money;
+        currentAction.InventoryBefore = InventoryQuantity(offer.QualifiedItemId);
+        currentAction.Phase = ActionPhase.PerformMenuAction;
+    }
+
+    private void PerformBuyItem()
+    {
+        if (currentAction is null || Game1.activeClickableMenu is not ShopMenu shop)
+        {
+            Fail("WRONG_MENU", "The observed shop menu closed before purchase.", true);
+            return;
+        }
+        currentAction.ToolWaitTicks++;
+        if (currentAction.ToolWaitTicks < 30)
+            return;
+        var x = shop.xPositionOnScreen + 160;
+        var y = shop.yPositionOnScreen + 120 + currentAction.MenuIndex * 98;
+        for (var count = 0; count < currentAction.Quantity; count++)
+            shop.receiveLeftClick(x, y);
+        var inventoryAfter = InventoryQuantity(currentAction.OfferItemId!);
+        if (inventoryAfter - currentAction.InventoryBefore == currentAction.Quantity
+            && game.Player.Money < currentAction.MoneyBefore)
+        {
+            Succeed("OK", "The requested item quantity increased and wallet money decreased.", true);
+            return;
+        }
+        Fail("PURCHASE_NOT_CONFIRMED", "The exact requested purchase was not verified.", false);
+    }
+
+    private void BeginSleep()
+    {
+        if (currentAction is null || observations.LastObservation is null)
+            return;
+        var bed = observations.LastObservation.Entities
+            .Where(entity => entity.Kind == "bed" && entity.Reachable)
+            .OrderBy(entity => entity.PathCost ?? int.MaxValue)
+            .FirstOrDefault();
+        currentAction.Preconditions.Add(new("bed_exists", bed is not null));
+        if (bed is null)
+        {
+            Fail("BED_NOT_REACHABLE", "No reachable bed action is available.", true);
+            return;
+        }
+        currentAction.TargetId = bed.Id;
+        currentAction.TargetTile = bed.Tile;
+        currentAction.Operation = "start_sleep";
+        currentAction.StartDay = Game1.Date.TotalDays;
+        StartEntityMovement(bed);
+    }
+
+    private void BeginAdvanceDialogue()
+    {
+        if (currentAction is null)
+            return;
+        if (Game1.activeClickableMenu is not null)
+        {
+            currentAction.UseActionButton = true;
+            currentAction.Operation = "advance_menu";
+            currentAction.Phase = ActionPhase.TriggerInput;
+            return;
+        }
+        var shop = observations.LastObservation?.Entities
+            .Where(entity => entity.Kind == "shop" && entity.Reachable)
+            .OrderBy(entity => entity.PathCost ?? int.MaxValue)
+            .FirstOrDefault();
+        if (shop is null)
+        {
+            Fail("NO_DIALOGUE_TARGET", "There is no open dialogue or reachable vanilla service counter.", true);
+            return;
+        }
+        currentAction.TargetId = shop.Id;
+        currentAction.TargetTile = shop.Tile;
+        currentAction.Operation = "open_shop";
+        StartEntityMovement(shop);
+    }
+
+    private void BeginTravel()
+    {
+        if (currentAction is null || observations.LastObservation is null)
+            return;
+        var destination = currentAction.PlanAction.Args.GetProperty("destination").GetString()!;
+        var route = observations.LastObservation.Routes
+            .Where(edge => edge.FromLocation == game.LocationName && edge.ToLocation == destination)
+            .OrderBy(edge => edge.DepartureTile.Y)
+            .ThenBy(edge => edge.DepartureTile.X)
+            .FirstOrDefault();
+        currentAction.Preconditions.Add(new("direct_route_exists", route is not null));
+        if (route is null)
+        {
+            Fail("NO_ROUTE", $"No direct route from {game.LocationName} to {destination} is currently available.", true);
+            return;
+        }
+        currentAction.ExpectedFromLocation = route.FromLocation;
+        currentAction.ExpectedToLocation = route.ToLocation;
+        currentAction.TargetTile = route.DepartureTile;
+        currentAction.WarpButton = WarpButton(route.DepartureTile);
+        currentAction.Trace.Add(new("MOVE_TO_EXPECTED_WARP", game.Tick, $"{route.DepartureTile.X},{route.DepartureTile.Y}"));
+        if (!movement.Start(route.DepartureTile, allowWarp: true))
+        {
+            Fail(movement.FailureCode ?? "NO_PATH", "No path to the expected warp was found.", true);
+            return;
+        }
+        currentAction.Phase = ActionPhase.Move;
+    }
+
+    private void BeginHarvestCrop()
+    {
+        if (!ResolveEntity("crop", out var entity))
+            return;
+        var dirt = game.GetDirt(new Point(entity!.Tile.X, entity.Tile.Y));
+        var harvestable = dirt?.crop is { } crop
+            && crop.currentPhase.Value >= crop.phaseDays.Count - 1
+            && (!crop.fullyGrown.Value || crop.dayOfCurrentPhase.Value <= 0);
+        currentAction!.Preconditions.Add(new("target_is_harvestable", harvestable));
+        if (!harvestable)
+        {
+            Fail("NOT_HARVESTABLE", "The crop is not ready for hand harvesting.", false);
+            return;
+        }
+        currentAction.TargetTile = entity.Tile;
+        currentAction.InventoryBefore = InventoryQuantity();
+        StartEntityMovement(entity);
+    }
+
+    private void BeginPlantCrop()
+    {
+        if (!ResolveEntity("planting_tile", out var entity))
+            return;
+        var qualifiedItemId = currentAction!.PlanAction.Args.GetProperty("qualified_item_id").GetString()!;
+        var slot = FindInventoryItem(qualifiedItemId);
+        currentAction.Preconditions.Add(new("seed_exists", slot >= 0));
+        if (slot < 0)
+        {
+            Fail("ITEM_NOT_FOUND", "The requested seed is not in inventory.", false);
+            return;
+        }
+        var item = game.Player.Items[slot];
+        currentAction.Preconditions.Add(new("item_is_seed", item?.Category == StardewValley.Object.SeedsCategory));
+        if (item?.Category != StardewValley.Object.SeedsCategory)
+        {
+            Fail("INVALID_SEED", "The selected inventory item is not a seed.", false);
+            return;
+        }
+        var dirt = game.GetDirt(new Point(entity!.Tile.X, entity.Tile.Y));
+        if (dirt?.crop is not null)
+        {
+            Fail("SOIL_OCCUPIED", "The planting tile already contains a crop.", false);
+            return;
+        }
+        currentAction.TargetTile = entity.Tile;
+        currentAction.SeedSlot = slot;
+        currentAction.InventoryBefore = item.Stack;
+        currentAction.WaterAfterPlanting =
+            currentAction.PlanAction.Args.GetProperty("water_after_planting").GetBoolean();
+        if (dirt is null)
+        {
+            var hoeSlot = FindTool<Hoe>();
+            currentAction.Preconditions.Add(new("hoe_exists", hoeSlot >= 0));
+            if (hoeSlot < 0)
+            {
+                Fail("NO_HOE", "A hoe is required to prepare this planting tile.", false);
+                return;
+            }
+            currentAction.ToolSlot = hoeSlot;
+            currentAction.Operation = "till";
+        }
+        else
+        {
+            currentAction.ToolSlot = slot;
+            currentAction.Operation = "plant";
+        }
+        StartEntityMovement(entity);
+    }
+
+    private void BeginClearDebris()
+    {
+        if (!ResolveEntity("debris", out var entity))
+            return;
+        var requiredTool = entity!.Properties.TryGetValue("required_tool", out var value)
+            ? value?.ToString()
+            : null;
+        var slot = requiredTool switch
+        {
+            "axe" => FindTool<Axe>(),
+            "pickaxe" => FindTool<Pickaxe>(),
+            "scythe" => FindTool<MeleeWeapon>(),
+            _ => -1
+        };
+        currentAction!.Preconditions.Add(new("required_tool_exists", slot >= 0));
+        if (slot < 0)
+        {
+            Fail("TOOL_NOT_FOUND", $"No {requiredTool ?? "supported"} tool was found.", false);
+            return;
+        }
+        currentAction.TargetTile = entity.Tile;
+        currentAction.ToolSlot = slot;
+        currentAction.Operation = "clear";
+        StartEntityMovement(entity);
+    }
+
+    private bool ResolveEntity(string kind, out Entity? entity)
+    {
+        entity = null;
+        if (currentAction is null || observations.LastObservation is null)
+            return false;
+        var targetId = currentAction.PlanAction.Args.GetProperty("target_id").GetString()!;
+        var revision = currentAction.PlanAction.Args.GetProperty("target_revision").GetString()!;
+        currentAction.TargetId = targetId;
+        entity = observations.LastObservation.Entities.FirstOrDefault(candidate => candidate.Id == targetId);
+        currentAction.Preconditions.Add(new("target_exists", entity is not null));
+        if (entity is null || entity.Kind != kind || entity.Location != game.LocationName)
+        {
+            Fail("TARGET_STALE", $"The {kind} target is no longer present in the current location.", false);
+            return false;
+        }
+        currentAction.Preconditions.Add(new("target_revision_matches", entity.Revision == revision));
+        if (entity.Revision != revision)
+        {
+            Fail("TARGET_STALE", "The target revision changed.", false);
+            return false;
+        }
+        return true;
+    }
+
+    private void StartEntityMovement(Entity entity)
+    {
+        currentAction!.InteractionOptions = entity.InteractionTiles
+            .Where(tile => tile.Reachable)
+            .OrderBy(tile => tile.PathCost ?? int.MaxValue)
+            .ThenBy(tile => tile.Tile.Y)
+            .ThenBy(tile => tile.Tile.X)
+            .ToArray();
+        currentAction.InteractionIndex = -1;
+        if (!StartNextInteractionPosition())
+        {
+            Fail("TARGET_UNREACHABLE", "No reachable interaction tile exists.", true);
+        }
+    }
+
+    private bool TryNextInteractionPosition(string failureCode)
+    {
+        if (failureCode is not ("STUCK" or "NO_PATH" or "TARGET_UNREACHABLE"))
+            return false;
+        return StartNextInteractionPosition();
+    }
+
+    private bool StartNextInteractionPosition()
+    {
+        if (currentAction is null)
+            return false;
+        while (++currentAction.InteractionIndex < currentAction.InteractionOptions.Count)
+        {
+            var interaction = currentAction.InteractionOptions[currentAction.InteractionIndex];
+            currentAction.Facing = interaction.Facing;
+            currentAction.Trace.Add(new(
+                "TRY_INTERACTION_POSITION",
+                game.Tick,
+                $"{interaction.Tile.X},{interaction.Tile.Y}"));
+            if (movement.Start(interaction.Tile))
+            {
+                currentAction.Phase = ActionPhase.Move;
+                return true;
+            }
+        }
+        return false;
     }
 
     private void BeginWaterCrop()
@@ -315,25 +775,28 @@ internal sealed class PlanExecutor
                 movement.Tick();
                 if (movement.FailureCode is not null)
                 {
+                    currentAction.Trace.Add(new("MOVEMENT_DIAGNOSTIC", game.Tick, movement.Diagnostic));
+                    if (TryNextInteractionPosition(movement.FailureCode))
+                        return;
                     Fail(movement.FailureCode, "Movement failed.", true);
                     return;
                 }
                 if (!movement.Completed)
                     return;
                 for (var i = 0; i < movement.TraversedTiles; i++) active.Budget.RecordMovementTile();
-                if (currentAction.PlanAction.Action == "move_to")
+                if (currentAction.PlanAction.Action == "travel_to")
                 {
-                    Succeed("OK", "The target tile was reached.", true);
+                    currentAction.Phase = ActionPhase.WaitForWarp;
+                    currentAction.ToolWaitTicks = 0;
                     return;
                 }
-                PrepareWateringTool();
+                PrepareCurrentAction();
                 break;
             case ActionPhase.Wait:
-                currentAction.RemainingTicks--;
-                if (currentAction.RemainingTicks <= 0)
-                    Succeed("OK", "The requested wait completed.", false);
+                if (game.TimeOfDay >= currentAction.TargetTime)
+                    Succeed("OK", "The requested game time was reached.", false);
                 break;
-            case ActionPhase.WaitForTool:
+            case ActionPhase.WaitForInput:
                 currentAction.ToolWaitTicks++;
                 if (game.Player.UsingTool)
                     currentAction.SawToolUse = true;
@@ -349,6 +812,80 @@ internal sealed class PlanExecutor
                         Fail("REFILL_NOT_CONFIRMED", "Refilling was not verified before the timeout.", true);
                     return;
                 }
+                if (currentAction.PlanAction.Action == "harvest_crop")
+                {
+                    var harvestDirt = DirtForCurrent();
+                    if (currentAction.ToolWaitTicks > 2
+                        && (harvestDirt?.crop is null || !IsHarvestable(harvestDirt.crop))
+                        && InventoryQuantity() > currentAction.InventoryBefore)
+                    {
+                        Succeed("OK", "The crop was removed and harvest inventory increased.", true);
+                        return;
+                    }
+                    if (currentAction.ToolWaitTicks > 180)
+                        Fail("HARVEST_NOT_CONFIRMED", "Harvesting was not verified before the timeout.", false);
+                    return;
+                }
+                if (currentAction.PlanAction.Action == "clear_debris")
+                {
+                    var tile = currentAction.TargetTile!;
+                    if (!game.Location.Objects.ContainsKey(new Vector2(tile.X, tile.Y)))
+                    {
+                        Succeed("OK", "The debris was removed.", true);
+                        return;
+                    }
+                    if (!game.Player.UsingTool && currentAction.ToolWaitTicks > 15 && currentAction.ToolWaitTicks < 150)
+                    {
+                        currentAction.InputTriggered = false;
+                        currentAction.Phase = ActionPhase.TriggerInput;
+                        return;
+                    }
+                    if (currentAction.ToolWaitTicks > 180)
+                        Fail("DEBRIS_NOT_CLEARED", "Debris removal was not verified before the timeout.", true);
+                    return;
+                }
+                if (currentAction.PlanAction.Action == "plant_crop")
+                {
+                    TickPlantCrop();
+                    return;
+                }
+                if (currentAction.PlanAction.Action == "advance_dialogue")
+                {
+                    if (currentAction.ToolWaitTicks > 2)
+                        Succeed("OK", "The vanilla dialogue/menu action was advanced.", true);
+                    return;
+                }
+                if (currentAction.PlanAction.Action == "sleep")
+                {
+                    if (Game1.activeClickableMenu is not null && currentAction.Operation == "start_sleep")
+                    {
+                        currentAction.Operation = "confirm_sleep";
+                        currentAction.InputTriggered = false;
+                        currentAction.ToolWaitTicks = 0;
+                        currentAction.Phase = ActionPhase.TriggerInput;
+                        return;
+                    }
+                    if (currentAction.Operation == "confirm_sleep" && currentAction.ToolWaitTicks > 2)
+                    {
+                        currentAction.Phase = ActionPhase.WaitForDay;
+                        return;
+                    }
+                    if (currentAction.ToolWaitTicks > 180)
+                        Fail("SLEEP_NOT_CONFIRMED", "The sleep transition was not confirmed.", true);
+                    return;
+                }
+                if (currentAction.PlanAction.Action == "ship_items")
+                {
+                    if (Game1.activeClickableMenu?.GetType().Name.Contains("Shipping", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        currentAction.ToolWaitTicks = 0;
+                        currentAction.Phase = ActionPhase.PerformMenuAction;
+                        return;
+                    }
+                    if (currentAction.ToolWaitTicks > 180)
+                        Fail("WRONG_MENU", "The shipping menu did not open.", true);
+                    return;
+                }
                 var dirt = currentAction.TargetTile is null
                     ? null
                     : game.GetDirt(new Point(currentAction.TargetTile.X, currentAction.TargetTile.Y));
@@ -360,20 +897,182 @@ internal sealed class PlanExecutor
                 if (currentAction.ToolWaitTicks > 180)
                     Fail("TOOL_USE_FAILED", "Watering was not verified before the timeout.", true);
                 break;
+            case ActionPhase.WaitForWarp:
+                currentAction.ToolWaitTicks++;
+                if (currentAction.ToolWaitTicks > 120)
+                    Fail("LOCATION_CHANGED", "The expected warp did not complete.", true);
+                break;
+            case ActionPhase.WaitForDay:
+                if (game.WorldReady && Game1.Date.TotalDays > currentAction.StartDay)
+                    Succeed("OK", "The day advanced.", true);
+                break;
+            case ActionPhase.PerformMenuAction:
+                if (currentAction.PlanAction.Action == "buy_item")
+                    PerformBuyItem();
+                else if (currentAction.PlanAction.Action == "ship_items")
+                    PerformShipItems();
+                break;
         }
     }
 
-    private void PrepareWateringTool()
+    private void PerformShipItems()
+    {
+        if (currentAction is null || Game1.activeClickableMenu is not { } menu
+            || !menu.GetType().Name.Contains("Shipping", StringComparison.OrdinalIgnoreCase))
+        {
+            Fail("WRONG_MENU", "The vanilla shipping menu closed before transfer.", true);
+            return;
+        }
+        currentAction.ToolWaitTicks++;
+        if (currentAction.ToolWaitTicks < 20)
+            return;
+        foreach (var slot in currentAction.InventorySlots.OrderByDescending(value => value))
+        {
+            var column = slot % 12;
+            var row = slot / 12;
+            var x = menu.xPositionOnScreen + 32 + column * 64 + 32;
+            var y = menu.yPositionOnScreen + menu.height - 224 + row * 64 + 32;
+            menu.receiveLeftClick(x, y);
+        }
+        var remaining = currentAction.InventorySlots.Sum(slot => game.Player.Items[slot]?.Stack ?? 0);
+        if (remaining < currentAction.InventoryBefore && ShippingQuantity() > currentAction.ShippingBefore)
+        {
+            Succeed("OK", "Matching inventory decreased and shipping-bin contents increased.", true);
+            return;
+        }
+        Fail("SHIP_NOT_CONFIRMED", "The selected items were not verified in the shipping bin.", false);
+    }
+
+    private void TickPlantCrop()
+    {
+        if (currentAction is null)
+            return;
+        var dirt = DirtForCurrent();
+        if (currentAction.Operation == "till")
+        {
+            if (dirt is not null && !game.Player.UsingTool)
+            {
+                game.SelectTool(currentAction.SeedSlot);
+                currentAction.ToolSlot = currentAction.SeedSlot;
+                currentAction.Operation = "plant";
+                currentAction.UseActionButton = true;
+                currentAction.InputTriggered = false;
+                currentAction.ToolWaitTicks = 0;
+                currentAction.Phase = ActionPhase.TriggerInput;
+                return;
+            }
+            if (currentAction.ToolWaitTicks > 180)
+                Fail("TILL_NOT_CONFIRMED", "Tilling was not verified before the timeout.", true);
+            return;
+        }
+        if (currentAction.Operation == "plant")
+        {
+            var seedRemaining = game.Player.Items[currentAction.SeedSlot]?.Stack ?? 0;
+            if (dirt?.crop is not null && seedRemaining < currentAction.InventoryBefore)
+            {
+                if (!currentAction.WaterAfterPlanting || dirt.isWatered())
+                {
+                    Succeed("OK", "The seed count decreased and a crop appeared.", true);
+                    return;
+                }
+                var can = game.FindWateringCan(out var canSlot);
+                if (can is null || can.WaterLeft <= 0)
+                {
+                    Fail(can is null ? "NO_WATERING_CAN" : "NO_WATER", "The crop was planted but could not be watered.", true);
+                    return;
+                }
+                game.SelectTool(canSlot);
+                currentAction.ToolSlot = canSlot;
+                currentAction.Operation = "water_planted";
+                currentAction.UseActionButton = false;
+                currentAction.InputTriggered = false;
+                currentAction.ToolWaitTicks = 0;
+                currentAction.Phase = ActionPhase.TriggerInput;
+                return;
+            }
+            if (currentAction.ToolWaitTicks > 90)
+                Fail("PLANT_NOT_CONFIRMED", "Planting was not verified before the timeout.", false);
+            return;
+        }
+        if (currentAction.Operation == "water_planted")
+        {
+            if (currentAction.SawToolUse && !game.Player.UsingTool && dirt?.isWatered() == true)
+            {
+                Succeed("OK", "The crop was planted and watered.", true);
+                return;
+            }
+            if (currentAction.ToolWaitTicks > 180)
+                Fail("TOOL_USE_FAILED", "Watering the planted crop was not verified.", true);
+        }
+    }
+
+    private void PrepareCurrentAction()
+    {
+        if (currentAction is null)
+            return;
+        if (currentAction.PlanAction.Action is "harvest_crop" or "sleep" or "advance_dialogue" or "ship_items")
+        {
+            game.Face(Direction(currentAction.Facing));
+            currentAction.UseActionButton = true;
+            currentAction.Phase = ActionPhase.TriggerInput;
+            return;
+        }
+        PrepareTool();
+    }
+
+    private void PrepareTool()
     {
         if (currentAction is null || currentAction.ToolSlot is null)
             return;
         game.SelectTool(currentAction.ToolSlot.Value);
         game.Face(Direction(currentAction.Facing));
+        currentAction.UseActionButton =
+            currentAction.PlanAction.Action == "plant_crop"
+            && currentAction.Operation == "plant";
         currentAction.Trace.Add(new("SELECT_TOOL_OR_ITEM", game.Tick));
         currentAction.Trace.Add(new("FACE", game.Tick, currentAction.Facing));
-        currentAction.Phase = ActionPhase.TriggerTool;
+        currentAction.Phase = ActionPhase.TriggerInput;
         active?.Budget.RecordToolUse();
     }
+
+    private int FindInventoryItem(string qualifiedItemId)
+    {
+        for (var index = 0; index < game.Player.Items.Count; index++)
+        {
+            if (game.Player.Items[index]?.QualifiedItemId == qualifiedItemId)
+                return index;
+        }
+        return -1;
+    }
+
+    private int FindTool<TTool>() where TTool : Tool
+    {
+        for (var index = 0; index < game.Player.Items.Count; index++)
+        {
+            if (game.Player.Items[index] is TTool)
+                return index;
+        }
+        return -1;
+    }
+
+    private int InventoryQuantity() =>
+        game.Player.Items.Where(item => item is not null).Sum(item => item!.Stack);
+
+    private int InventoryQuantity(string qualifiedItemId) =>
+        game.Player.Items
+            .Where(item => item?.QualifiedItemId == qualifiedItemId)
+            .Sum(item => item!.Stack);
+
+    private static int ShippingQuantity() =>
+        Game1.getFarm().getShippingBin(Game1.player).Sum(item => item.Stack);
+
+    private HoeDirt? DirtForCurrent() => currentAction?.TargetTile is { } tile
+        ? game.GetDirt(new Point(tile.X, tile.Y))
+        : null;
+
+    private static bool IsHarvestable(Crop crop) =>
+        crop.currentPhase.Value >= crop.phaseDays.Count - 1
+        && (!crop.fullyGrown.Value || crop.dayOfCurrentPhase.Value <= 0);
 
     private void Succeed(string code, string message, bool changed) => CompleteAction("succeeded", code, message, false, changed);
 
@@ -440,6 +1139,35 @@ internal sealed class PlanExecutor
         }
         if (action.PlanAction.Action == "water_crop" && action.TargetId is not null)
             changes.Add(new($"/entities_by_id/{EscapePointer(action.TargetId)}/properties/watered", false, true));
+        if (action.PlanAction.Action == "plant_crop" && action.TargetId is not null)
+        {
+            changes.Add(new($"/entities_by_id/{EscapePointer(action.TargetId)}/properties/occupied", false, true));
+            changes.Add(new($"/inventory/{action.SeedSlot}/quantity", action.InventoryBefore,
+                game.Player.Items[action.SeedSlot]?.Stack ?? 0));
+        }
+        if (action.PlanAction.Action == "harvest_crop" && action.TargetId is not null)
+        {
+            changes.Add(new($"/entities_by_id/{EscapePointer(action.TargetId)}/properties/harvestable", true, false));
+            changes.Add(new("/inventory/total_quantity", action.InventoryBefore, InventoryQuantity()));
+        }
+        if (action.PlanAction.Action == "clear_debris" && action.TargetId is not null)
+            changes.Add(new($"/entities_by_id/{EscapePointer(action.TargetId)}", action.TargetId, null));
+        if (action.PlanAction.Action == "buy_item")
+        {
+            changes.Add(new("/player/money", action.MoneyBefore, game.Player.Money));
+            changes.Add(new($"/inventory/by_item/{EscapePointer(action.OfferItemId!)}/quantity",
+                action.InventoryBefore, InventoryQuantity(action.OfferItemId!)));
+        }
+        if (action.PlanAction.Action == "ship_items")
+        {
+            changes.Add(new("/inventory/selected_quantity", action.InventoryBefore,
+                action.InventorySlots.Sum(slot => game.Player.Items[slot]?.Stack ?? 0)));
+            changes.Add(new("/economy/shipping_bin_quantity", action.ShippingBefore, ShippingQuantity()));
+        }
+        if (action.PlanAction.Action == "travel_to")
+            changes.Add(new("/game/location", action.LocationBefore, game.LocationName));
+        if (action.PlanAction.Action == "sleep")
+            changes.Add(new("/game/day_index", action.DayBefore, Game1.Date.TotalDays));
         return new StateDiff(
             action.BaseObservationId,
             changes,
@@ -463,9 +1191,17 @@ internal sealed class PlanExecutor
         {
             active.FinalObservation = observations.Build(previousExecution: active.Summary());
         }
-        catch (GameStateException)
+        catch (Exception error)
         {
             active.FinalObservation = null;
+            protocol.Publish(
+                "observation_invalidated",
+                active.ExecutionId,
+                new
+                {
+                    code = "FINAL_OBSERVATION_FAILED",
+                    error = error.GetType().Name
+                });
         }
         protocol.Publish("execution_state_changed", active.ExecutionId, new { status, message });
         active = null;
@@ -477,6 +1213,36 @@ internal sealed class PlanExecutor
     {
         "up" => Game1.up, "right" => Game1.right, "down" => Game1.down, "left" => Game1.left, _ => Game1.down
     };
+
+    private SButton? WarpButton(TilePoint tile)
+    {
+        if (game.LocationName == "Farm"
+            && currentAction?.ExpectedToLocation == "FarmHouse")
+        {
+            return Game1.options.moveUpButton.Count() > 0
+                ? Game1.options.moveUpButton[0].ToSButton()
+                : SButton.W;
+        }
+        var width = game.Location.Map.Layers[0].LayerWidth;
+        var height = game.Location.Map.Layers[0].LayerHeight;
+        if (tile.X == 0)
+            return Game1.options.moveLeftButton.Count() > 0
+                ? Game1.options.moveLeftButton[0].ToSButton()
+                : SButton.A;
+        if (tile.X == width - 1)
+            return Game1.options.moveRightButton.Count() > 0
+                ? Game1.options.moveRightButton[0].ToSButton()
+                : SButton.D;
+        if (tile.Y == 0)
+            return Game1.options.moveUpButton.Count() > 0
+                ? Game1.options.moveUpButton[0].ToSButton()
+                : SButton.W;
+        if (tile.Y == height - 1)
+            return Game1.options.moveDownButton.Count() > 0
+                ? Game1.options.moveDownButton[0].ToSButton()
+                : SButton.S;
+        return null;
+    }
 
     private sealed class MutableExecution
     {
@@ -520,6 +1286,8 @@ internal sealed class PlanExecutor
             StartedAtUtc = startedAtUtc;
             GameTimeBefore = gameTimeBefore;
             EnergyBefore = Game1.player.Stamina;
+            LocationBefore = Game1.currentLocation.NameOrUniqueName;
+            DayBefore = Game1.Date.TotalDays;
             BaseObservationId = string.Empty;
         }
 
@@ -527,6 +1295,8 @@ internal sealed class PlanExecutor
         public DateTimeOffset StartedAtUtc { get; }
         public int GameTimeBefore { get; }
         public float EnergyBefore { get; }
+        public string LocationBefore { get; }
+        public int DayBefore { get; }
         public string BaseObservationId { get; set; }
         public ActionPhase Phase { get; set; }
         public string? TargetId { get; set; }
@@ -534,15 +1304,39 @@ internal sealed class PlanExecutor
         public int? ToolSlot { get; set; }
         public string? Facing { get; set; }
         public int RemainingTicks { get; set; }
+        public int TargetTime { get; set; }
         public int ToolWaitTicks { get; set; }
         public int WaterBefore { get; set; }
+        public int SeedSlot { get; set; }
+        public int InventoryBefore { get; set; }
+        public string? Operation { get; set; }
+        public bool WaterAfterPlanting { get; set; }
+        public bool UseActionButton { get; set; }
+        public string? ExpectedFromLocation { get; set; }
+        public string? ExpectedToLocation { get; set; }
+        public SButton? WarpButton { get; set; }
+        public bool OwnsMenu { get; set; }
+        public int StartDay { get; set; }
+        public int MenuIndex { get; set; }
+        public int Quantity { get; set; }
+        public int MoneyBefore { get; set; }
+        public string? OfferItemId { get; set; }
+        public int ShippingBefore { get; set; }
+        public IReadOnlyList<int> InventorySlots { get; set; } = Array.Empty<int>();
+        public IReadOnlyList<InteractionTile> InteractionOptions { get; set; } =
+            Array.Empty<InteractionTile>();
+        public int InteractionIndex { get; set; }
         public bool InputTriggered { get; set; }
         public bool SawToolUse { get; set; }
         public List<PreconditionResult> Preconditions { get; } = new();
         public List<TraceEntry> Trace { get; } = new();
     }
 
-    private enum ActionPhase { None, Move, Wait, TriggerTool, WaitForTool }
+    private enum ActionPhase
+    {
+        None, Move, Wait, TriggerInput, WaitForInput, WaitForWarp, WaitForDay,
+        PerformMenuAction
+    }
 }
 
 internal sealed class PlanRejectedException : Exception

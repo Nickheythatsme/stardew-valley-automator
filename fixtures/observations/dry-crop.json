@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "observation_id": "obs-fixture-1",
   "world_revision": 1,
   "captured_at_utc": "2026-07-16T18:00:00Z",
@@ -78,5 +78,14 @@
     "reachable_water_sources": 0,
     "containers": 0,
     "omitted_entities": {}
+  },
+  "routes": [],
+  "ui_state": null,
+  "shop_offers": [],
+  "economy": {
+    "wallet": 640,
+    "pending_shipping_value": 0,
+    "seed_shop_open": false,
+    "seed_shop_next_open_time": 900
   }
 }

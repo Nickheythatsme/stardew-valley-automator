@@ -74,6 +74,44 @@ public sealed record ObservationSummary(
     int Containers,
     IReadOnlyDictionary<string, int> OmittedEntities);
 
+public sealed record RouteEdge(
+    string FromLocation,
+    string ToLocation,
+    TilePoint DepartureTile,
+    TilePoint ArrivalTile);
+
+public sealed record UiChoice(string Id, string Label);
+
+public sealed record UiState(
+    string Kind,
+    string MenuType,
+    string? Text,
+    IReadOnlyList<UiChoice> Choices,
+    bool OwnedByExecutor);
+
+public sealed record ShopOffer(
+    string Id,
+    string Revision,
+    string ShopId,
+    string QualifiedItemId,
+    string Name,
+    int Price,
+    int? Stock,
+    bool Available,
+    bool IsSeed,
+    string? CropId,
+    int? GrowthDays,
+    IReadOnlyList<string> Seasons,
+    string? HarvestMethod,
+    bool Trellis,
+    int? RegrowDays);
+
+public sealed record EconomyState(
+    int Wallet,
+    int PendingShippingValue,
+    bool SeedShopOpen,
+    int? SeedShopNextOpenTime);
+
 public sealed record Observation(
     string SchemaVersion,
     string ObservationId,
@@ -85,6 +123,10 @@ public sealed record Observation(
     LocalGrid LocalGrid,
     IReadOnlyList<Entity> Entities,
     ObservationSummary Summary,
+    IReadOnlyList<RouteEdge> Routes,
+    UiState? UiState,
+    IReadOnlyList<ShopOffer> ShopOffers,
+    EconomyState Economy,
     ExecutionSummary? PreviousExecution = null);
 
 public sealed record StateChange(string Path, object? Before, object? After);

@@ -52,13 +52,18 @@ class GameClient:
 
     async def connect(self) -> dict[str, Any]:
         self._reader, self._writer = await asyncio.wait_for(
-            asyncio.open_connection(self.host, self.port), timeout=5
+            asyncio.open_connection(
+                self.host,
+                self.port,
+                limit=MAX_LINE_BYTES + 1,
+            ),
+            timeout=5,
         )
         self._reader_task = asyncio.create_task(self._read_loop(), name="stardew-agent-reader")
         return await self.request(
             "hello",
             {"token": self.token, "client_name": "stardew-agent-python", "client_version": "0.1.0"},
-            timeout=5,
+            timeout=15,
         )
 
     async def close(self) -> None:
@@ -117,7 +122,7 @@ class GameClient:
         return response.result
 
     async def observe(self, grid_radius: int = 10) -> Observation:
-        result = await self.request("observe", {"grid_radius": grid_radius})
+        result = await self.request("observe", {"grid_radius": grid_radius}, timeout=60)
         return Observation.model_validate(result)
 
     async def execute_plan(self, plan: ActionPlan) -> str:
@@ -127,7 +132,11 @@ class GameClient:
         return str(result["execution_id"])
 
     async def get_execution(self, execution_id: str) -> ExecutionResult:
-        result = await self.request("get_execution", {"execution_id": execution_id})
+        result = await self.request(
+            "get_execution",
+            {"execution_id": execution_id},
+            timeout=60,
+        )
         return ExecutionResult.model_validate(result)
 
     async def cancel_execution(self, execution_id: str) -> None:

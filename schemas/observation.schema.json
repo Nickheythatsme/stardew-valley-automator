@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://stardew-agent.local/schemas/observation.schema.json",
-  "title": "Stardew Agent Observation",
+  "title": "Stardew Agent Observation v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "observation_id", "world_revision", "captured_at_utc", "game", "player", "inventory", "local_grid", "entities", "summary"],
+  "required": ["schema_version", "observation_id", "world_revision", "captured_at_utc", "game", "player", "inventory", "local_grid", "entities", "summary", "routes", "ui_state", "shop_offers", "economy"],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"const": "2.0"},
     "observation_id": {"type": "string", "minLength": 1},
     "world_revision": {"type": "integer", "minimum": 0},
     "captured_at_utc": {"type": "string", "format": "date-time"},
@@ -15,53 +15,163 @@
     "inventory": {"type": "array", "items": {"$ref": "#/$defs/inventory"}, "maxItems": 36},
     "local_grid": {"$ref": "#/$defs/grid"},
     "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}, "maxItems": 128},
-    "summary": {"type": "object"},
+    "summary": {"$ref": "#/$defs/summary"},
+    "routes": {"type": "array", "items": {"$ref": "#/$defs/route"}},
+    "ui_state": {"oneOf": [{"$ref": "#/$defs/ui"}, {"type": "null"}]},
+    "shop_offers": {"type": "array", "items": {"$ref": "#/$defs/offer"}, "maxItems": 128},
+    "economy": {"$ref": "#/$defs/economy"},
     "previous_execution": {"type": ["object", "null"]}
   },
   "$defs": {
+    "location": {"enum": ["Farm", "FarmHouse", "BusStop", "Town", "SeedShop"]},
     "tile": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}},
     "pixel": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}}},
     "game": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "required": ["save_id", "time", "season", "day", "year", "weather", "location", "world_ready", "paused", "active_menu", "event_active"],
       "properties": {
-        "save_id": {"type": "string"}, "time": {"type": "integer"}, "season": {"enum": ["spring", "summer", "fall", "winter"]},
-        "day": {"type": "integer"}, "year": {"type": "integer"}, "weather": {"type": "string"}, "location": {"const": "Farm"},
-        "world_ready": {"type": "boolean"}, "paused": {"type": "boolean"}, "active_menu": {"type": ["string", "null"]}, "event_active": {"type": "boolean"}
+        "save_id": {"type": "string"},
+        "time": {"type": "integer"},
+        "season": {"enum": ["spring", "summer", "fall", "winter"]},
+        "day": {"type": "integer"},
+        "year": {"type": "integer"},
+        "weather": {"type": "string"},
+        "location": {"$ref": "#/$defs/location"},
+        "world_ready": {"type": "boolean"},
+        "paused": {"type": "boolean"},
+        "active_menu": {"type": ["string", "null"]},
+        "event_active": {"type": "boolean"}
       }
     },
     "player": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "required": ["tile", "pixel", "facing", "energy", "max_energy", "health", "max_health", "money", "busy", "using_tool", "selected_slot"],
       "properties": {
-        "tile": {"$ref": "#/$defs/tile"}, "pixel": {"$ref": "#/$defs/pixel"}, "facing": {"enum": ["up", "right", "down", "left"]},
-        "energy": {"type": "number"}, "max_energy": {"type": "integer"}, "health": {"type": "integer"}, "max_health": {"type": "integer"},
-        "money": {"type": "integer"}, "busy": {"type": "boolean"}, "using_tool": {"type": "boolean"}, "selected_slot": {"type": "integer"}
+        "tile": {"$ref": "#/$defs/tile"},
+        "pixel": {"$ref": "#/$defs/pixel"},
+        "facing": {"enum": ["up", "right", "down", "left"]},
+        "energy": {"type": "number"},
+        "max_energy": {"type": "integer"},
+        "health": {"type": "integer"},
+        "max_health": {"type": "integer"},
+        "money": {"type": "integer"},
+        "busy": {"type": "boolean"},
+        "using_tool": {"type": "boolean"},
+        "selected_slot": {"type": "integer"}
       }
     },
     "inventory": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "required": ["slot", "qualified_item_id", "name", "type", "quantity"],
       "properties": {
-        "slot": {"type": "integer"}, "qualified_item_id": {"type": "string"}, "name": {"type": "string"}, "type": {"type": "string"}, "quantity": {"type": "integer"},
-        "tool_upgrade_level": {"type": ["integer", "null"]}, "water": {"type": ["integer", "null"]}, "water_capacity": {"type": ["integer", "null"]}
+        "slot": {"type": "integer"},
+        "qualified_item_id": {"type": "string"},
+        "name": {"type": "string"},
+        "type": {"type": "string"},
+        "quantity": {"type": "integer"},
+        "tool_upgrade_level": {"type": ["integer", "null"]},
+        "water": {"type": ["integer", "null"]},
+        "water_capacity": {"type": ["integer", "null"]}
       }
     },
     "grid": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "required": ["origin", "width", "height", "rows", "legend"],
       "properties": {
-        "origin": {"$ref": "#/$defs/tile"}, "width": {"type": "integer", "minimum": 1, "maximum": 31}, "height": {"type": "integer", "minimum": 1, "maximum": 31},
-        "rows": {"type": "array", "items": {"type": "string"}, "maxItems": 31}, "legend": {"type": "object", "additionalProperties": {"type": "string"}}
+        "origin": {"$ref": "#/$defs/tile"},
+        "width": {"type": "integer", "minimum": 1, "maximum": 31},
+        "height": {"type": "integer", "minimum": 1, "maximum": 31},
+        "rows": {"type": "array", "items": {"type": "string"}, "maxItems": 31},
+        "legend": {"type": "object", "additionalProperties": {"type": "string"}}
       }
     },
     "entity": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "required": ["id", "revision", "kind", "location", "tile", "reachable", "path_cost", "interaction_tiles", "properties"],
       "properties": {
-        "id": {"type": "string"}, "revision": {"type": "string"}, "kind": {"enum": ["crop", "tilled_soil", "container", "water_source"]}, "location": {"const": "Farm"},
-        "tile": {"$ref": "#/$defs/tile"}, "reachable": {"type": "boolean"}, "path_cost": {"type": ["integer", "null"]},
-        "interaction_tiles": {"type": "array", "items": {"type": "object"}}, "properties": {"type": "object"}
+        "id": {"type": "string"},
+        "revision": {"type": "string"},
+        "kind": {"enum": ["crop", "planting_tile", "debris", "container", "water_source", "shipping_bin", "shop", "bed"]},
+        "location": {"$ref": "#/$defs/location"},
+        "tile": {"$ref": "#/$defs/tile"},
+        "reachable": {"type": "boolean"},
+        "path_cost": {"type": ["integer", "null"]},
+        "interaction_tiles": {"type": "array", "items": {"type": "object"}},
+        "properties": {"type": "object"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dry_crops", "harvestable_crops", "empty_tilled_tiles", "reachable_water_sources", "containers", "omitted_entities"],
+      "properties": {
+        "dry_crops": {"type": "integer"},
+        "harvestable_crops": {"type": "integer"},
+        "empty_tilled_tiles": {"type": "integer"},
+        "reachable_water_sources": {"type": "integer"},
+        "containers": {"type": "integer"},
+        "omitted_entities": {"type": "object", "additionalProperties": {"type": "integer"}}
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_location", "to_location", "departure_tile", "arrival_tile"],
+      "properties": {
+        "from_location": {"$ref": "#/$defs/location"},
+        "to_location": {"$ref": "#/$defs/location"},
+        "departure_tile": {"$ref": "#/$defs/tile"},
+        "arrival_tile": {"$ref": "#/$defs/tile"}
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "menu_type", "text", "choices", "owned_by_executor"],
+      "properties": {
+        "kind": {"enum": ["dialogue", "question", "shop", "shipping", "sleep_confirmation", "overnight_summary", "level_up", "unknown"]},
+        "menu_type": {"type": "string"},
+        "text": {"type": ["string", "null"]},
+        "choices": {"type": "array", "items": {"type": "object"}},
+        "owned_by_executor": {"type": "boolean"}
+      }
+    },
+    "offer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "revision", "shop_id", "qualified_item_id", "name", "price", "stock", "available", "is_seed", "crop_id", "growth_days", "seasons", "harvest_method", "trellis", "regrow_days"],
+      "properties": {
+        "id": {"type": "string"},
+        "revision": {"type": "string"},
+        "shop_id": {"type": "string"},
+        "qualified_item_id": {"type": "string"},
+        "name": {"type": "string"},
+        "price": {"type": "integer", "minimum": 0},
+        "stock": {"type": ["integer", "null"]},
+        "available": {"type": "boolean"},
+        "is_seed": {"type": "boolean"},
+        "crop_id": {"type": ["string", "null"]},
+        "growth_days": {"type": ["integer", "null"]},
+        "seasons": {"type": "array", "items": {"enum": ["spring", "summer", "fall", "winter"]}},
+        "harvest_method": {"enum": ["hand", "scythe", "unknown", null]},
+        "trellis": {"type": "boolean"},
+        "regrow_days": {"type": ["integer", "null"]}
+      }
+    },
+    "economy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallet", "pending_shipping_value", "seed_shop_open", "seed_shop_next_open_time"],
+      "properties": {
+        "wallet": {"type": "integer"},
+        "pending_shipping_value": {"type": "integer"},
+        "seed_shop_open": {"type": "boolean"},
+        "seed_shop_next_open_time": {"type": ["integer", "null"]}
       }
     }
   }

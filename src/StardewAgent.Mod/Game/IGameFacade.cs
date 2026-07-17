@@ -15,6 +15,9 @@ internal interface IGameFacade
     string LocationName { get; }
     bool IsSinglePlayer { get; }
     bool IsFarm { get; }
+    bool IsSupportedLocation { get; }
+    bool InputSuspended { get; }
+    bool IsGameWindowActive { get; }
     WateringCan? FindWateringCan(out int slot);
     HoeDirt? GetDirt(Point tile);
     void Face(int direction);

@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://stardew-agent.local/schemas/action-plan.schema.json",
-  "title": "Stardew Agent Action Plan",
+  "title": "Stardew Agent Action Plan v2",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "plan_id", "expected_observation_id", "goal", "actions", "stop_conditions", "request_replan_after"],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"const": "2.0"},
     "plan_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "expected_observation_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "goal": {"type": "string", "minLength": 1, "maxLength": 512},
@@ -36,9 +36,28 @@
       "properties": {
         "action_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "action": {
-          "enum": ["move_to", "water_crop", "refill_watering_can", "harvest_crop", "plant_seed", "deposit_items", "wait", "finish"]
+          "enum": ["travel_to", "clear_debris", "plant_crop", "water_crop", "refill_watering_can", "harvest_crop", "buy_item", "ship_items", "wait_until", "sleep", "advance_dialogue", "choose_response", "dismiss_menu", "finish"]
         },
-        "args": {"type": "object"},
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "target_id": {"type": "string", "minLength": 1},
+            "target_revision": {"type": "string", "minLength": 1},
+            "destination": {"enum": ["Farm", "FarmHouse", "BusStop", "Town", "SeedShop"]},
+            "qualified_item_id": {"type": "string", "minLength": 1},
+            "offer_id": {"type": "string", "minLength": 1},
+            "offer_revision": {"type": "string", "minLength": 1},
+            "quantity": {"type": "integer", "minimum": 1, "maximum": 999},
+            "source_id": {"type": "string", "minLength": 1},
+            "water_after_planting": {"type": "boolean"},
+            "selector_item_ids": {"type": "array", "maxItems": 64, "items": {"type": "string", "minLength": 1}},
+            "category": {"enum": ["crop", "forage", "seed"]},
+            "time": {"type": "integer", "minimum": 600, "maximum": 2600},
+            "response_id": {"type": "string", "minLength": 1},
+            "reason": {"type": "string", "minLength": 1, "maxLength": 256}
+          }
+        },
         "continue_on": {
           "type": "array",
           "uniqueItems": true,
@@ -47,125 +66,40 @@
       },
       "allOf": [
         {
-          "if": {"properties": {"action": {"enum": ["water_crop", "harvest_crop"]}}},
+          "if": {"properties": {"action": {"enum": ["clear_debris", "plant_crop", "water_crop", "harvest_crop"]}}},
+          "then": {"properties": {"args": {"required": ["target_id", "target_revision"]}}}
+        },
+        {
+          "if": {"properties": {"action": {"const": "travel_to"}}},
+          "then": {"properties": {"args": {"required": ["destination"]}}}
+        },
+        {
+          "if": {"properties": {"action": {"const": "plant_crop"}}},
+          "then": {"properties": {"args": {"required": ["qualified_item_id", "water_after_planting"]}}}
+        },
+        {
+          "if": {"properties": {"action": {"const": "buy_item"}}},
+          "then": {"properties": {"args": {"required": ["offer_id", "offer_revision", "quantity"]}}}
+        },
+        {
+          "if": {"properties": {"action": {"const": "ship_items"}}},
           "then": {
-            "properties": {
-              "args": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["target_id", "target_revision"],
-                "properties": {
-                  "target_id": {"type": "string", "minLength": 1},
-                  "target_revision": {"type": "string", "minLength": 1}
-                }
-              }
-            }
+            "properties": {"args": {"anyOf": [{"required": ["selector_item_ids"]}, {"required": ["category"]}]}}
           }
         },
         {
-          "if": {"properties": {"action": {"const": "move_to"}}},
-          "then": {
-            "properties": {
-              "args": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["tile"],
-                "properties": {
-                  "tile": {"$ref": "#/$defs/tile"},
-                  "tolerance_pixels": {"type": "integer", "minimum": 1, "maximum": 16},
-                  "avoid_warps": {"const": true}
-                }
-              }
-            }
-          }
+          "if": {"properties": {"action": {"const": "wait_until"}}},
+          "then": {"properties": {"args": {"required": ["time"]}}}
         },
         {
-          "if": {"properties": {"action": {"const": "refill_watering_can"}}},
-          "then": {
-            "properties": {
-              "args": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {"source_id": {"type": "string", "minLength": 1}}
-              }
-            }
-          }
-        },
-        {
-          "if": {"properties": {"action": {"const": "plant_seed"}}},
-          "then": {
-            "properties": {
-              "args": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["soil_id", "soil_revision", "inventory_slot"],
-                "properties": {
-                  "soil_id": {"type": "string", "minLength": 1},
-                  "soil_revision": {"type": "string", "minLength": 1},
-                  "inventory_slot": {"type": "integer", "minimum": 0, "maximum": 35}
-                }
-              }
-            }
-          }
-        },
-        {
-          "if": {"properties": {"action": {"const": "deposit_items"}}},
-          "then": {
-            "properties": {
-              "args": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["container_id", "container_revision", "selector"],
-                "properties": {
-                  "container_id": {"type": "string", "minLength": 1},
-                  "container_revision": {"type": "string", "minLength": 1},
-                  "selector": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "minProperties": 1,
-                    "properties": {
-                      "slots": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 35}},
-                      "qualified_item_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
-                      "category": {"enum": ["crop", "forage", "seed"]}
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        {
-          "if": {"properties": {"action": {"const": "wait"}}},
-          "then": {
-            "properties": {
-              "args": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["ticks"],
-                "properties": {"ticks": {"type": "integer", "minimum": 1, "maximum": 300}}
-              }
-            }
-          }
+          "if": {"properties": {"action": {"const": "choose_response"}}},
+          "then": {"properties": {"args": {"required": ["response_id"]}}}
         },
         {
           "if": {"properties": {"action": {"const": "finish"}}},
-          "then": {
-            "properties": {
-              "args": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["reason"],
-                "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": 256}}
-              }
-            }
-          }
+          "then": {"properties": {"args": {"required": ["reason"]}}}
         }
       ]
-    },
-    "tile": {
-      "type": "array",
-      "prefixItems": [{"type": "integer"}, {"type": "integer"}],
-      "items": false
     }
   }
 }

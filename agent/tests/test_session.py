@@ -18,3 +18,20 @@ def test_session_writes_compressed_observation(tmp_path: Path, observation: Obse
             assert json.load(handle)["observation_id"] == observation.observation_id
     finally:
         store.close()
+
+
+def test_session_writes_llm_debug_jsonl(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path, "test goal")
+    try:
+        store.llm_debug(
+            {
+                "event": "request",
+                "system_prompt": "bounded system prompt",
+                "user_prompt": "bounded user prompt",
+            }
+        )
+        record = json.loads((store.path / "llm-debug.jsonl").read_text(encoding="utf-8"))
+        assert record["event"] == "request"
+        assert record["user_prompt"] == "bounded user prompt"
+    finally:
+        store.close()

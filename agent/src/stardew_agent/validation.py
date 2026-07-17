@@ -84,7 +84,7 @@ class PlanValidator:
 
         entities = {entity.id: entity for entity in observation.entities}
         for index, action in enumerate(plan.actions):
-            if action.action in {"water_crop", "harvest_crop"}:
+            if action.action in {"clear_debris", "plant_crop", "water_crop", "harvest_crop"}:
                 entity = entities.get(action.args["target_id"])
                 if entity is None:
                     issues.append(
@@ -102,12 +102,47 @@ class PlanValidator:
                             "The target revision does not match the observation.",
                         )
                     )
-                elif entity.kind != "crop":
+                elif action.action in {"water_crop", "harvest_crop"} and entity.kind != "crop":
                     issues.append(
                         ValidationIssue(
                             f"/actions/{index}/args/target_id",
                             "WRONG_TARGET_KIND",
                             "The selected action requires a crop target.",
+                        )
+                    )
+                elif action.action == "plant_crop" and entity.kind != "planting_tile":
+                    issues.append(
+                        ValidationIssue(
+                            f"/actions/{index}/args/target_id",
+                            "WRONG_TARGET_KIND",
+                            "plant_crop requires a planting_tile target.",
+                        )
+                    )
+                elif action.action == "clear_debris" and entity.kind != "debris":
+                    issues.append(
+                        ValidationIssue(
+                            f"/actions/{index}/args/target_id",
+                            "WRONG_TARGET_KIND",
+                            "clear_debris requires a debris target.",
+                        )
+                    )
+            if action.action == "buy_item":
+                offers = {offer.id: offer for offer in observation.shop_offers}
+                offer = offers.get(action.args["offer_id"])
+                if offer is None:
+                    issues.append(
+                        ValidationIssue(
+                            f"/actions/{index}/args/offer_id",
+                            "OFFER_NOT_FOUND",
+                            "The shop offer is not present in the observation.",
+                        )
+                    )
+                elif offer.revision != action.args["offer_revision"]:
+                    issues.append(
+                        ValidationIssue(
+                            f"/actions/{index}/args/offer_revision",
+                            "OFFER_STALE",
+                            "The shop offer revision does not match.",
                         )
                     )
         return issues

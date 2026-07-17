@@ -16,6 +16,9 @@ internal sealed class MovementController
     private Vector2 previousStanding;
     private int stationaryTicks;
     private long startedTick;
+    private Vector2 startedStanding;
+    private TilePoint? requestedTarget;
+    private int injectedTicks;
 
     public MovementController(IGameFacade game) => this.game = game;
 
@@ -24,14 +27,29 @@ internal sealed class MovementController
     public string? FailureCode { get; private set; }
     public int TraversedTiles { get; private set; }
     public SButton? LastInjectedButton { get; private set; }
+    public string Diagnostic
+    {
+        get
+        {
+            var standing = game.Player.getStandingPosition();
+            var target = requestedTarget ?? new TilePoint(-1, -1);
+            var waypoint = waypointIndex < path.Count ? path[waypointIndex] : target;
+            return $"target={target.X},{target.Y}; waypoint={waypoint.X},{waypoint.Y}; " +
+                   $"start={startedStanding.X:0.0},{startedStanding.Y:0.0}; current={standing.X:0.0},{standing.Y:0.0}; " +
+                   $"button={LastInjectedButton?.ToString() ?? "none"}; injected_ticks={injectedTicks}; " +
+                   $"stationary_ticks={stationaryTicks}; game_window_active={game.IsGameWindowActive}; " +
+                   $"input_suspended={game.InputSuspended}";
+        }
+    }
 
-    public bool Start(TilePoint target)
+    public bool Start(TilePoint target, bool allowWarp = false)
     {
         Reset();
+        requestedTarget = target;
         var player = game.Player;
         var grid = new GameNavigationGrid(game.Location, player);
         var start = new TilePoint(player.TilePoint.X, player.TilePoint.Y);
-        var result = planner.FindPath(grid, start, target);
+        var result = planner.FindPath(grid, start, target, new PathSearchOptions(AvoidWarps: !allowWarp));
         if (!result.Found)
         {
             FailureCode = result.Code;
@@ -40,6 +58,7 @@ internal sealed class MovementController
         path = result.Tiles;
         waypointIndex = path.Count > 1 ? 1 : 0;
         previousStanding = player.getStandingPosition();
+        startedStanding = previousStanding;
         startedTick = game.Tick;
         Completed = path.Count == 1 && IsCentered(path[0]);
         Running = !Completed;
@@ -64,6 +83,7 @@ internal sealed class MovementController
         else
             return null;
         LastInjectedButton = button;
+        injectedTicks++;
         return button;
     }
 
@@ -126,6 +146,9 @@ internal sealed class MovementController
         Completed = false;
         FailureCode = null;
         LastInjectedButton = null;
+        startedStanding = Vector2.Zero;
+        requestedTarget = default;
+        injectedTicks = 0;
     }
 
     private void Fail(string code)

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "plan_id": "fixture-water-one",
   "expected_observation_id": "obs-fixture-1",
   "goal": "Water one reachable dry crop",

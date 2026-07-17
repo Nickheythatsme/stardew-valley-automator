@@ -3,14 +3,74 @@
 A safety-first, mod-based control layer for an AI agent playing Stardew Valley. The system is split into:
 
 - a C# SMAPI mod that owns observation, navigation, semantic actions, verification, budgets, and cancellation;
-- a Python runtime that validates JSON action plans, supervises execution, logs sessions, and can later call an LLM through a provider-neutral interface;
+- a Python runtime that validates JSON action plans, supervises execution, logs sessions, evaluates goals, and calls OpenAI through a provider-neutral interface;
 - canonical JSON Schemas shared by both processes.
 
-The first implemented slice supports Farm observations, authenticated NDJSON over loopback TCP, deterministic four-directional A* pathfinding, plan validation, execution lifecycle records, and the `move_to`, `water_crop`, `refill_watering_can`, `wait`, and `finish` action contracts. Live movement, watering, and refilling are tick-driven by the SMAPI mod and require the compatibility checks described below.
+The v2 prototype supports bounded crop-economy goals across Farm, FarmHouse, BusStop,
+Town, and SeedShop. The Python runner uses OpenAI Structured Outputs to create JSON
+action plans; the SMAPI mod independently validates and verifies each gameplay action.
+Generated code is never executed.
+
+## Run an autonomous goal
+
+1. Start Stardew Valley through SMAPI, load the save you intentionally want to automate,
+   and leave the game running.
+2. Open a second terminal in this repository and install/update the runner:
+
+   ```sh
+   uv sync --project agent --all-extras
+   ```
+
+3. Find the endpoint written by the running mod:
+
+   ```sh
+   ENDPOINT="$HOME/Library/Application Support/Steam/steamapps/common/Stardew Valley/Contents/MacOS/Mods/StardewAgent.Mod/.runtime/endpoint.json"
+   ```
+
+4. Start the bounded autonomous crop goal:
+
+   ```sh
+   uv run --project agent stardew-agent run-goal \
+     "Plant and harvest crops until you have $1000 in the bank" \
+     --endpoint "$ENDPOINT"
+   ```
+
+The runner reads `OPENAI_API_KEY` and optional `OPENAI_MODEL` from `.env`. Its defaults
+are model `gpt-5.6-terra`, medium reasoning, 14 in-game days, 64 provider requests, and
+120 wall-clock minutes. Manual movement/tool/action input cancels automation.
+
+Each autonomous session prints the path to `llm-debug.jsonl`. That file records the
+exact system/user prompts sent to OpenAI, parsed structured responses, normalized plans,
+validation issues, retries, response IDs, and token usage. It never records the API key.
+Monitor the newest session with:
+
+```sh
+tail -f "$(find runs -name llm-debug.jsonl -type f -print0 | xargs -0 ls -t | head -1)" \
+  | jq .
+```
+
+Disable **Pause When Game Window Is Inactive** in Stardew's options if you want to
+watch this log in another Terminal while automation runs. Otherwise the runner waits
+without sending model requests until the game is focused again.
+
+Inspect or resume the latest checkpoint with:
+
+```sh
+uv run --project agent stardew-agent status
+uv run --project agent stardew-agent resume runs/YYYY-MM-DD/session-UUID \
+  --endpoint "$ENDPOINT"
+```
+
+The deterministic regression command remains available:
+
+```sh
+uv run --project agent stardew-agent water-one --endpoint "$ENDPOINT"
+```
 
 ## Run the automator end to end on this Mac
 
-The installed prototype waters one reachable dry crop. It observes structured game state, optionally refills an empty watering can at a reachable source, moves through the normal game input path, waters the selected crop, verifies dry soil became watered, and records the result. No LLM is required for this first slice.
+The deterministic `water-one` regression observes structured game state, optionally
+refills an empty watering can, waters one crop, verifies the change, and records it.
 
 ### 1. One-time setup
 
@@ -108,13 +168,11 @@ To interrupt an active run, press a movement, action, or tool button in the game
 | SMAPI Terminal does not open | Launch from Steam, not the original game executable. The installed wrapper uses a persistent `open-smapi-terminal.command` beside SMAPI. |
 | `SMAPI endpoint ready` is not printed | Confirm Stardew Agent appears in the SMAPI loaded-mod list. Restart the game if `.runtime/endpoint.json` is stale or absent. |
 | `WORLD_NOT_READY` | Load a save fully before starting Python. |
-| `UNSUPPORTED_LOCATION` | Return to the Farm; the prototype is Farm-only. |
+| `UNSUPPORTED_LOCATION` | Return to Farm, FarmHouse, BusStop, Town, or SeedShop. |
 | The player does not move while Terminal is focused | Disable **Pause When Game Window Is Inactive**, then Command–Tab back to the game. |
 | The plan finishes without watering | Make sure a reachable crop is dry, it is before noon, energy is above 25, and the watering can is present. |
 | `CLIENT_ALREADY_CONNECTED` | Stop the earlier `stardew-agent` process or restart Stardew Valley. |
 | The run is cancelled immediately | Avoid movement/tool/action input and close any open game menu before starting. |
-
-The current prototype does not yet run an LLM goal loop or implement harvesting, planting, or chest deposits. Those action names are reserved by the schemas but rejected safely by the mod.
 
 ## Validate the local installation
 
@@ -122,8 +180,8 @@ Run the deterministic plan validator and test suites without opening the game:
 
 ```sh
 cd "/Users/nickgrout/Documents/stardew-vally-automator"
-agent/.venv/bin/stardew-agent validate fixtures/plans/water-one.json
-agent/.venv/bin/pytest -q
+uv run --project agent stardew-agent validate fixtures/plans/water-one.json
+uv run --project agent pytest -q
 ```
 
 ## C# development

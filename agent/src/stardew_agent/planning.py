@@ -16,7 +16,7 @@ def plan_water_one(observation: Observation) -> ActionPlan:
     ]
     if not crops:
         return ActionPlan(
-            schema_version="1.0",
+            schema_version="2.0",
             plan_id=f"plan-{uuid.uuid4()}",
             expected_observation_id=observation.observation_id,
             goal="Water one reachable dry crop",
@@ -69,7 +69,7 @@ def plan_water_one(observation: Observation) -> ActionPlan:
         ]
     )
     return ActionPlan(
-        schema_version="1.0",
+        schema_version="2.0",
         plan_id=f"plan-{uuid.uuid4()}",
         expected_observation_id=observation.observation_id,
         goal="Water one reachable dry crop",

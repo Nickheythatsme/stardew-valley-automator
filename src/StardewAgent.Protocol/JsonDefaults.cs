@@ -46,7 +46,7 @@ internal sealed class SnakeCaseNamingPolicy : JsonNamingPolicy
 public static class ProtocolLimits
 {
     public const string ProtocolVersion = "1.0";
-    public const string SchemaVersion = "1.0";
+    public const string SchemaVersion = "2.0";
     public const int MaxLineBytes = 1024 * 1024;
     public const int MaxPlanBytes = 32 * 1024;
     public const int MaxJsonDepth = 12;

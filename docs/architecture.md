@@ -10,4 +10,7 @@ The C# projects are separated into:
 
 Socket tasks exchange immutable requests through a concurrent queue. Only `UpdateTicked` reads game objects or advances actions. `UpdateTicking` injects a single configured game input for the current movement/tool state. Disconnects, manual input, warps, unexpected menus, timeouts, and budget violations terminate the active execution.
 
-The implemented live slice is `observe`, `move_to`, `water_crop`, `refill_watering_can`, `wait`, and `finish`. Harvest, planting, and chest transfer remain reserved schema actions and are rejected safely until their game-specific verification paths are implemented.
+The v2 live slice includes structured multi-location observations and bounded
+crop-economy transactions. The Python process owns OpenAI calls, goal evaluation,
+checkpoints, and replanning. The mod remains the safety boundary and owns navigation,
+vanilla UI transitions, postcondition checks, cancellation, and execution budgets.

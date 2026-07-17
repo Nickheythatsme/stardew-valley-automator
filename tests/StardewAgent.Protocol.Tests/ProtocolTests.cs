@@ -9,10 +9,10 @@ public sealed class ProtocolTests
     [Fact]
     public void SerializesSnakeCaseEnvelope()
     {
-        var envelope = ResponseEnvelope.Success("req-1", new { SchemaVersion = "1.0" });
+        var envelope = ResponseEnvelope.Success("req-1", new { SchemaVersion = "2.0" });
         var json = JsonSerializer.Serialize(envelope, JsonDefaults.Options);
         Assert.Contains("\"protocol_version\":\"1.0\"", json);
-        Assert.Contains("\"schema_version\":\"1.0\"", json);
+        Assert.Contains("\"schema_version\":\"2.0\"", json);
     }
 
     [Fact]
@@ -20,7 +20,7 @@ public sealed class ProtocolTests
     {
         using var arguments = JsonDocument.Parse("{\"reason\":\"done\"}");
         var plan = new ActionPlan(
-            "1.0",
+            "2.0",
             "plan-1",
             "obs-old",
             "test",

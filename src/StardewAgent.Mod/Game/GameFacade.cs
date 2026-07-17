@@ -8,6 +8,10 @@ namespace StardewAgent.Mod.Game;
 
 internal sealed class GameFacade : IGameFacade
 {
+    private static readonly HashSet<string> SupportedLocations = new(StringComparer.Ordinal)
+    {
+        "Farm", "FarmHouse", "BusStop", "Town", "SeedShop"
+    };
     public GameFacade(IModHelper helper)
     {
         ArgumentNullException.ThrowIfNull(helper);
@@ -21,6 +25,10 @@ internal sealed class GameFacade : IGameFacade
     public string LocationName => WorldReady ? Location.NameOrUniqueName : string.Empty;
     public bool IsSinglePlayer => !Context.IsMultiplayer;
     public bool IsFarm => WorldReady && LocationName == "Farm";
+    public bool IsSupportedLocation => WorldReady && SupportedLocations.Contains(LocationName);
+    public bool InputSuspended =>
+        WorldReady && Game1.options.pauseWhenOutOfFocus && !Game1.game1.IsActive;
+    public bool IsGameWindowActive => Game1.game1.IsActive;
 
     public WateringCan? FindWateringCan(out int slot)
     {

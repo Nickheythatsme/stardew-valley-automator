@@ -6,4 +6,6 @@ The first request must be `hello` with the token. Supported methods are `hello`,
 
 `request_id` and `plan_id` are idempotency keys. The mod caches the latest 256 request responses and maps repeated plan IDs to their original execution.
 
-Canonical schemas live in `schemas/`. Protocol and action schema version `1.0` use strict additional-property rejection.
+Canonical schemas live in `schemas/`. Transport envelopes remain protocol version
+`1.0`; observations and action plans use schema version `2.0`. All reject unknown
+properties.
